@@ -1,6 +1,7 @@
 // 零依赖发布完整性闸门（CI 与本地同一入口）：
 // 1) package.json files[] 在磁盘上全部存在
-// 2) lib/index.js 含 'sources.register(' 与 kind 名探针（不带引号子串，兼容产物引号风格）
+// 2) lib/index.js 含 'sources.register(' 与 kind 名探针（不带引号子串，兼容产物引号风格），
+//    以及 '/dsh-iot/api' 与 '/deliver' 路由契约探针（防 webServer seam 路由漂移）
 // 3) cordis.patch.yml - id: 与包名一致
 // 4) locale/zh.json 与 en.json 可解析且顶层 key 集合一致
 // 5) icon.svg 存在
@@ -25,6 +26,9 @@ try {
   const code = await readFile(resolve(root, 'lib', 'index.js'), 'utf8')
   if (!code.includes('sources.register(')) failures.push('lib/index.js 缺 sources.register( 探针（Source 未注册？）')
   if (!code.includes(KIND)) failures.push('lib/index.js 缺 kind 名探针：' + KIND)
+  // 路由契约探针（rpc-contract.md §1/§2）：webServer seam 前缀与主动投递端点字面量，防漂移。
+  if (!code.includes('/dsh-iot/api')) failures.push("lib/index.js 缺 '/dsh-iot/api' 路由契约探针（webServer seam 路由未注册？）")
+  if (!code.includes('/deliver')) failures.push("lib/index.js 缺 '/deliver' 路由契约探针（主动投递端点漂移？）")
 } catch {
   failures.push('lib/index.js 不存在（先 pnpm check 构建）')
 }

@@ -23,6 +23,27 @@ export function sendFailuresFile(baseDir?: string): string {
   return join(stateBase(baseDir), 'send-failures.jsonl')
 }
 
+export interface SendFailureEntry { at: string; channelKey: string; kind: string; error: string }
+
+/** 读取最近 limit 条发送失败（health 端点用）：坏行跳过，缺文件返回空数组，绝不抛出。 */
+export async function readSendFailures(limit: number, baseDir?: string): Promise<SendFailureEntry[]> {
+  try {
+    const raw = await readFile(sendFailuresFile(baseDir), 'utf8')
+    const entries: SendFailureEntry[] = []
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue
+      try {
+        const row = JSON.parse(line) as Partial<SendFailureEntry>
+        if (typeof row.at !== 'string' || typeof row.error !== 'string') continue
+        entries.push({ at: row.at, channelKey: String(row.channelKey ?? ''), kind: String(row.kind ?? ''), error: row.error })
+      } catch { /* 坏行跳过 */ }
+    }
+    return entries.slice(Math.max(0, entries.length - limit))
+  } catch {
+    return []
+  }
+}
+
 /** 记录一次发布失败（JSONL 追加 + 超限滚动）；任何写失败只打日志，绝不抛出。 */
 export async function logSendFailure(entry: { channelKey: string; kind: string; error: string; at?: string }, baseDir?: string): Promise<void> {
   try {
