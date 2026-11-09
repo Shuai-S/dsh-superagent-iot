@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "IoT Source",
-    "description": "MQTT IoT source: local EMQX/Mosquitto/Home Assistant brokers and Aliyun/Tencent cloud (signed triple auth) telemetry becomes tickets via every/digest modes and threshold alerts; replies publish to command topics with a via loop-guard marker. QoS1 duplicates and retained messages are filtered; health reports connections and message rate.",
+    "description": "MQTT IoT source: EMQX/Mosquitto/Home Assistant and Aliyun/Tencent (signed triple auth) telemetry becomes tickets via every/digest modes and threshold alerts; replies publish to command topics with a via loop-guard marker. QoS1 duplicates and retained messages are filtered; health reports connections and rate.",
     "detail": "docs/DETAIL.md"
   }
 }
