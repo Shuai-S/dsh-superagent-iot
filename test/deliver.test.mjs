@@ -76,7 +76,7 @@ test('POST /api/deliver 受理：构造非人类 Trigger 送达 receive，响应
     const t = received[0]
     assert.equal(t.human, false, '契约 §2：非人类 Trigger')
     assert.equal(t.meta.deliver, true, 'meta.deliver=true')
-    assert.deepEqual(t.actor, { source: 'iot', id: 'iot' }, "actor='iot'")
+    assert.deepEqual(t.actor, { source: 'iot', id: 'dsh-superagent-iot' }, "actor='iot'")
     assert.equal(t.addressed, 'direct', 'machineGate scope 检查要求 addressed（iot scope observed=false）')
     assert.equal(t.meta.connectionId, 'c1', 'intake scope 过滤按 meta.connectionId 判 listened')
     assert.equal(t.meta.targetId, 'lamp')

@@ -20,7 +20,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { TriggerLike } from './types.ts'
 import type { IotConfig } from './iot-kind.ts'
 import { connectionRegistry, flowStats, idOf } from './iot-kind.ts'
-import { getTarget, readTargets, touchTarget, validTargetId, type TargetRecord } from './targets.ts'
+import { getTarget, readTargets, touchTarget, validTargetId, type TargetAddress, type TargetRecord, upsertTarget, removeTarget, writeTargets } from './targets.ts'
 import { readSendFailures } from './failure-log.ts'
 import { hash8 } from './util.ts'
 
@@ -116,7 +116,7 @@ export function buildDeliverTrigger(targetId: string, text: string, connId: stri
     id: 'iot:deliver:' + targetId + ':' + at + ':' + hash8(text),
     source: 'iot',
     threads: [{ source: 'iot', id: 'iot:deliver:' + targetId }],
-    actor: { source: 'iot', id: 'iot' },
+    actor: { source: 'iot', id: 'dsh-superagent-iot' },
     human: false,
     addressed: 'direct',
     at,
@@ -227,6 +227,37 @@ async function handleDeliverTest(req: IncomingMessage, res: ServerResponse, deps
   }
 }
 
+
+async function handleTargetsList(_req: IncomingMessage, res: ServerResponse, deps: ApiDeps & { port: number }): Promise<void> {
+  respondJson(res, 200, { ok: true, targets: (await readTargets(deps.baseDir)).targets })
+}
+
+async function handleTargetUpsert(req: IncomingMessage, res: ServerResponse, deps: ApiDeps & { port: number }): Promise<void> {
+  const raw = await readBody(req)
+  let body: Record<string, unknown>
+  try { body = JSON.parse(raw) as Record<string, unknown> } catch {
+    respondJson(res, 400, { error: 'bad-request', detail: 'body is not JSON' })
+    return
+  }
+  if (!validTargetId(body.id)) { respondJson(res, 400, { error: 'bad-request', detail: 'valid targetId required' }); return }
+  const rawAddress = body.address
+  if (!rawAddress || typeof rawAddress !== 'object' || Array.isArray(rawAddress)) { respondJson(res, 400, { error: 'bad-request', detail: 'address object required' }); return }
+  const addrRecord = rawAddress as Record<string, unknown>
+  if (typeof addrRecord.topic !== 'string' || !addrRecord.topic.trim()) { respondJson(res, 400, { error: 'bad-request', detail: 'address.topic required' }); return }
+  const clean: TargetAddress = { topic: addrRecord.topic.trim() }
+  if (typeof addrRecord.connection === 'string' && addrRecord.connection.trim()) clean.connection = addrRecord.connection.trim()
+  const label = typeof body.label === 'string' ? body.label : ''
+  const { created } = await upsertTarget({ id: body.id, address: clean, label }, deps.baseDir)
+  respondJson(res, 200, { ok: true, created })
+}
+
+async function handleTargetDelete(req: IncomingMessage, res: ServerResponse, deps: ApiDeps & { port: number }): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+  const id = decodeURIComponent(url.pathname.slice('/targets/'.length))
+  const removed = await removeTarget(id, deps.baseDir)
+  respondJson(res, removed ? 200 : 404, removed ? { ok: true } : { error: 'unknown-target' })
+}
+
 async function handleHealth(res: ServerResponse, deps: ApiDeps & { port: number }): Promise<void> {
   const [targets, failures] = await Promise.all([readTargets(deps.baseDir), readSendFailures(HEALTH_FAILURES, deps.baseDir)])
   let online = 0
@@ -261,6 +292,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: ApiDeps &
     return
   }
   const path = url.pathname.slice(API_PREFIX.length)
+  if (path === '/targets' && req.method === 'GET') { await handleTargetsList(req, res, deps); return }
+  if (path === '/targets' && req.method === 'PUT') { await handleTargetUpsert(req, res, deps); return }
+  if (path.startsWith('/targets/') && req.method === 'DELETE') { await handleTargetDelete(req, res, deps); return }
   if (path === '/health' && req.method === 'GET') { await handleHealth(res, deps); return }
   if (path === '/deliver' && req.method === 'POST') { await handleDeliver(req, res, deps); return }
   if (path === '/deliver/test' && req.method === 'POST') { await handleDeliverTest(req, res, deps); return }

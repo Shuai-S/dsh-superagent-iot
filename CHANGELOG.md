@@ -5,6 +5,10 @@
 ## [Unreleased]
 
 ### Added
+
+- P-C'（契约 §1/§4）：「源设置」共享页壳接入——vendored shell + src/shell/tab.ts（健康/目标 CRUD/deliver 测试，address={topic, connection?}）+ src/client.ts 新 client bundle 入口（esbuild --bundle devDep 豁免；react 宿主 require）；targets CRUD 路由 + targets.ts 增 upsert/remove；投递 actor id 统一为 dsh-superagent-iot（引擎配置前提同步改列该 id）
+
+### Added
 - 工程化闸门：新增 .github/workflows/ci.yml（push main + pull_request：pnpm install --frozen-lockfile → pnpm check → pnpm test → node scripts/verify-package.mjs）与 scripts/verify-package.mjs（零依赖完整性校验，同 qq 仓口径）。
 - 测试体系：test/*.test.mjs（node:test + node:assert，从构建产物 ../lib/index.js 导入，零网络零 broker）：IotConfigSchema 默认/拒绝与预处理、util 全部 helper、auth 阿里/腾讯三元组构造与签名复算、watch 告警匹配/冷却/摘要窗口/限流纯函数、Deduper、via 标记与 {topic} 回复主题 helper、failure-log 滚动与静默。既有 scripts/smoke.ts 保持原样（pnpm smoke，本地 aedes，不在 CI 闸门内）。
 - 渠道健壮性：src/failure-log.ts——publish 失败 JSONL（~/.local/state/dsh-superagent-iot/send-failures.jsonl，上限 200 行，{at,channelKey,kind,error≤300}，无凭据，写失败不影响主流程），channel.send 全部失败路径接入后照常抛出交引擎退避。

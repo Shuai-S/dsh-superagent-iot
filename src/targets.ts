@@ -95,3 +95,43 @@ export async function touchTarget(id: string, at: string, baseDir?: string): Pro
     console.error('[iot] targets touch skipped: ' + String(error).slice(0, 160))
   }
 }
+
+/** upsert 单目标（targetId 合法性由调用方校验；更新保留 createdAt）。 */
+export async function upsertTarget(input: { id: string; address: TargetAddress; label?: string }, baseDir?: string): Promise<{ created: boolean }> {
+  const path = targetsFile(baseDir)
+  let created = false
+  try {
+    const file = await readTargets(baseDir)
+    const at = new Date().toISOString()
+    const row = file.targets.find((t) => t.id === input.id)
+    if (row) {
+      row.address = input.address
+      row.label = input.label ?? row.label
+      row.lastUsedAt = at
+    } else {
+      created = true
+      file.targets.push({ id: input.id, address: input.address, label: input.label ?? '', createdAt: at, lastUsedAt: at })
+    }
+    await writeTargets(file, baseDir)
+  } catch (error) {
+    console.error('[iot] targets: upsert failed (' + String(error).slice(0, 160) + ')')
+    throw error
+  }
+  return { created }
+}
+
+/** 删除单目标；返回是否确有删除（不存在为 false）。 */
+export async function removeTarget(id: string, baseDir?: string): Promise<boolean> {
+  const path = targetsFile(baseDir)
+  let removed = false
+  try {
+    const file = await readTargets(baseDir)
+    const next = file.targets.filter((t) => t.id !== id)
+    if (next.length === file.targets.length) return false
+    removed = true
+    await writeTargets({ version: file.version, targets: next }, baseDir)
+  } catch (error) {
+    console.error('[iot] targets: remove failed (' + String(error).slice(0, 160) + ')')
+  }
+  return removed
+}

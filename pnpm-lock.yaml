@@ -24,6 +24,9 @@ importers:
       aedes:
         specifier: ^0.51.0
         version: 0.51.3
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
       tsdown:
         specifier: ^0.4.0
         version: 0.4.4(@babel/runtime@7.29.13)(typescript@5.9.3)
