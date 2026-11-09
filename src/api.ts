@@ -104,9 +104,10 @@ export function resolveConnection(target: TargetRecord, config: IotConfig | unde
 }
 
 /** 构造非人类投递 Trigger（契约 §2：human:false、meta.deliver=true、actor='iot'）。
- *  addressed:'direct' 与 meta.connectionId 是引擎链路的硬要求：machineGate 的 scope
- *  检查要求 addressed（iot scope observed=false），intake 的 scope 过滤按
- *  meta.connectionId 判 listened（缺失会被静默 disposition 为 filtered）。 */
+ *  引擎准入两道（2026-11-09 lead 裁决，prototype 全源码 grep 'connectionId' 零命中）：
+ *  addressed:'direct' 是引擎级 machineGate 要求；meta.connectionId 则是本 kind 自身
+ *  scope() 实现消费的过滤字段——intake 只调 options.scope.scope(trigger)，引擎不直接
+ *  读 connectionId；缺失会被本包 scope 静默 disposition 为 filtered，故随 target.address 提供。 */
 export function buildDeliverTrigger(targetId: string, text: string, connId: string, topic: string, kind?: unknown): TriggerLike {
   const at = new Date().toISOString()
   const meta: Record<string, unknown> = { deliver: true, targetId, connectionId: connId }
