@@ -5,8 +5,8 @@
  *  clean-session realtime delivery is the M1 contract, so messages missed
  *  while offline are not replayed. */
 import type { SourceContextLike, TriggerLike } from './types.ts'
-import { HEALTH_ENTRY, idOf, connectionRegistry, type IotConfig, type IotConnection } from './iot-kind.ts'
-import { connectIot, viaMarker, type IotClient, type MessagePacketLike } from './mqtt.ts'
+import { flowStats, HEALTH_ENTRY, idOf, connectionRegistry, type AlertRule, type IotConfig, type IotConnection } from './iot-kind.ts'
+import { connectIot, replyTopicFor, viaMarker, type IotClient, type MessagePacketLike } from './mqtt.ts'
 import { compare, dotPath, hash8, matchTopicFilter } from './util.ts'
 
 export function pause(ms: number, signal: AbortSignal): Promise<void> {
@@ -51,6 +51,45 @@ export function isSelfOrRetained(packet: MessagePacketLike, ignoreRetained: bool
   return Boolean(parsed && typeof parsed === 'object' && (parsed as Record<string, unknown>).via === ownVia)
 }
 
+/** 告警规则匹配（纯函数）：主题过滤 + dotPath 取值 + 数值校验 + 阈值比较；
+ *  任一环未命中返回 undefined。 */
+export function matchAlertRule(rule: AlertRule, topic: string, parsed: unknown): { rule: AlertRule; actual: number } | undefined {
+  if (!matchTopicFilter(rule.topic, topic)) return undefined
+  const actual = dotPath(parsed, rule.path)
+  if (typeof actual !== 'number' || !Number.isFinite(actual)) return undefined
+  if (!compare(actual, rule.op, rule.value)) return undefined
+  return { rule, actual }
+}
+
+/** 告警冷却放行（纯函数）：上次触发距今 ≥ cooldownSeconds 才放行，无记录视为放行。 */
+export function alertCooldownOpen(lastSeen: number | undefined, now: number, cooldownSeconds: number): boolean {
+  return now - (lastSeen ?? 0) >= cooldownSeconds * 1000
+}
+
+/** 摘要窗口到期（纯函数）：窗口时长下限 1s。 */
+export function digestDue(windowStart: number, now: number, digestSeconds: number): boolean {
+  return now - windowStart >= Math.max(1, digestSeconds) * 1000
+}
+
+/** 60s 滑动窗口限流（纯逻辑，now 可注入测试）：admit 返回是否放行。 */
+export class RateWindow {
+  private readonly times: number[] = []
+  admit(now: number, max: number): boolean {
+    while (this.times.length > 0 && now - this.times[0] > 60000) this.times.shift()
+    if (this.times.length >= max) return false
+    this.times.push(now)
+    return true
+  }
+}
+
+/** 健康 detail 追加紧凑流量计数：in=入站遥测（含重放）/ out=成功发布 /
+ *  fail=发布失败 / last=最近一次失败时间（UTC HH:MM:SS，无则 '-'）。 */
+export function withFlowDetail(base: string, stats: { in: number; out: number; fail: number; lastFailAt?: string }): string {
+  const last = stats.lastFailAt ? stats.lastFailAt.slice(11, 19) : '-'
+  const counters = 'in=' + stats.in + ' out=' + stats.out + ' fail=' + stats.fail + ' last=' + last
+  return base ? base + ' ' + counters : counters
+}
+
 interface ActiveConn {
   id: string
   hash: string
@@ -69,7 +108,7 @@ export async function watch(source: SourceContextLike, signal: AbortSignal): Pro
   const dedup = new Deduper()
   const digest = new Map<string, DigestEntry>()
   const alertCooldown = new Map<string, number>()
-  const triggerTimes: number[] = []
+  const rateWindow = new RateWindow()
   let connectionFailures = ''
   let config: IotConfig | undefined
   source.report(HEALTH_ENTRY, { state: 'starting', detail: '' })
@@ -81,7 +120,7 @@ export async function watch(source: SourceContextLike, signal: AbortSignal): Pro
     const at = new Date().toISOString()
     const address: Record<string, string> = { connection: conn.id, topic }
     const commandTopic = conn.config.commandTopic
-    if (commandTopic) address.replyTopic = commandTopic.split('{topic}').join(topic)
+    if (commandTopic) address.replyTopic = replyTopicFor(commandTopic, topic)
     const segment = conn.config.actorTopicSegment ? (topic.split('/')[conn.config.actorTopicSegment - 1] ?? '') : ''
     return {
       id: 'iot:' + conn.id + ':' + topic + ':' + at + ':' + hash8(text),
@@ -100,13 +139,7 @@ export async function watch(source: SourceContextLike, signal: AbortSignal): Pro
     try { await source.receive(trigger) } catch { /* a receive failure must not kill the watch */ }
   }
 
-  const admitTrigger = (now: number): boolean => {
-    const max = config?.maxTriggersPerMinute ?? 20
-    while (triggerTimes.length > 0 && now - triggerTimes[0] > 60000) triggerTimes.shift()
-    if (triggerTimes.length >= max) return false
-    triggerTimes.push(now)
-    return true
-  }
+  const admitTrigger = (now: number): boolean => rateWindow.admit(now, config?.maxTriggersPerMinute ?? 20)
 
   const accumulate = (connId: string, topic: string, text: string): void => {
     const key = connId + '|' + topic
@@ -130,13 +163,14 @@ export async function watch(source: SourceContextLike, signal: AbortSignal): Pro
     for (const [key, entry] of [...digest]) {
       const cfg = findConnection(entry.connId)
       if (!cfg) { digest.delete(key); continue }
-      if (now - entry.windowStart >= Math.max(1, cfg.digestSeconds) * 1000) await flushDigest(key, entry)
+      if (digestDue(entry.windowStart, now, cfg.digestSeconds)) await flushDigest(key, entry)
     }
   }
 
   const handleMessage = (conn: ActiveConn, topic: string, payload: Buffer, packet: MessagePacketLike): void => {
     const cfg = config
     if (!cfg) return
+    flowStats.in += 1
     conn.messages.push(Date.now())
     if (payload.length > cfg.payloadMaxBytes) return
     const text = payload.toString('utf8')
@@ -146,17 +180,14 @@ export async function watch(source: SourceContextLike, signal: AbortSignal): Pro
     if (parsed && typeof parsed === 'object') {
       const rules = conn.config.alerts ?? []
       for (let index = 0; index < rules.length; index++) {
-        const rule = rules[index]
-        if (!matchTopicFilter(rule.topic, topic)) continue
-        const actual = dotPath(parsed, rule.path)
-        if (typeof actual !== 'number' || !Number.isFinite(actual)) continue
-        if (!compare(actual, rule.op, rule.value)) continue
-        const cooldownKey = conn.id + ':' + index + ':' + rule.topic + ':' + rule.path + ':' + rule.op + ':' + rule.value
+        const hit = matchAlertRule(rules[index], topic, parsed)
+        if (!hit) continue
+        const cooldownKey = conn.id + ':' + index + ':' + hit.rule.topic + ':' + hit.rule.path + ':' + hit.rule.op + ':' + hit.rule.value
         const now = Date.now()
-        if (now - (alertCooldown.get(cooldownKey) ?? 0) < rule.cooldownSeconds * 1000) continue
+        if (!alertCooldownOpen(alertCooldown.get(cooldownKey), now, hit.rule.cooldownSeconds)) continue
         alertCooldown.set(cooldownKey, now)
-        const label = rule.label || rule.path
-        void emit(buildTrigger(conn, topic, '[iot-alert] ' + label + ' ' + rule.op + ' ' + rule.value + '（实际 ' + actual + '）\n' + text, { alert: label, value: actual }))
+        const label = hit.rule.label || hit.rule.path
+        void emit(buildTrigger(conn, topic, '[iot-alert] ' + label + ' ' + hit.rule.op + ' ' + hit.rule.value + '（实际 ' + hit.actual + '）\n' + text, { alert: label, value: hit.actual }))
         return
       }
     }
@@ -204,10 +235,10 @@ export async function watch(source: SourceContextLike, signal: AbortSignal): Pro
     }
     const values = { connections: String(conns.size), online: String(online), msgPerMin: String(msgs) }
     if (conns.size === 0) source.report(HEALTH_ENTRY, { state: 'paused', detail: 'waiting for connection configuration', values })
-    else if (online > 0) source.report(HEALTH_ENTRY, { state: 'ready', detail: '', values })
+    else if (online > 0) source.report(HEALTH_ENTRY, { state: 'ready', detail: withFlowDetail('', flowStats), values })
     else {
       const failed = [...conns.values()].find((a) => a.lastError)
-      source.report(HEALTH_ENTRY, { state: 'error', detail: failed?.lastError || connectionFailures || 'connecting…', values })
+      source.report(HEALTH_ENTRY, { state: 'error', detail: withFlowDetail(failed?.lastError || connectionFailures || 'connecting…', flowStats), values })
     }
   }
 

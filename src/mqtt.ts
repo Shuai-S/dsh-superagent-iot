@@ -39,6 +39,12 @@ export function viaMarker(clientId: string): string {
   return 'dsh-superagent-iot:' + clientId
 }
 
+/** 回复主题 {topic} 占位替换（纯函数）：watch 构建触发地址与 channel.send
+ *  下发共用同一实现；无占位时原样返回。 */
+export function replyTopicFor(commandTopic: string, topic: string): string {
+  return commandTopic.split('{topic}').join(topic)
+}
+
 export function connectIot(conn: ConnectionConfigLike, events: ConnectEvents): IotClient {
   const auth = buildAuth(conn)
   const clientId = auth ? auth.clientId : (conn.clientId || 'dsh-iot-' + randomHex(8))

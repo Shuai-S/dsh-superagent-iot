@@ -5,7 +5,8 @@
 import { z } from 'zod'
 import type { OutboundMessageLike, TriggerLike } from './types.ts'
 import { emptyLink } from './robot-helpers.ts'
-import type { IotClient } from './mqtt.ts'
+import { logSendFailure } from './failure-log.ts'
+import { replyTopicFor, type IotClient } from './mqtt.ts'
 
 export const HEALTH_ENTRY = 'iotMqtt'
 
@@ -14,6 +15,10 @@ export const idOf = (conn: IotConnection): string => conn.name || conn.url
 
 /** Connection registry refreshed by the watch supervisor; channel.send reads it. */
 export const connectionRegistry: { current: Map<string, { client: IotClient; via: string }> } = { current: new Map() }
+
+/** 流量计数（watch 健康上报读取）：in=入站遥测条数（含重放），out=成功发布，
+ *  fail=发布失败；lastFailAt/lastFail 记最近一次失败。进程生命周期内累计。 */
+export const flowStats = { in: 0, out: 0, fail: 0, lastFailAt: '', lastFail: '' }
 
 export interface AlertRule {
   topic: string
@@ -164,14 +169,25 @@ export const iotKind = {
     async send(_host: unknown, message: OutboundMessageLike): Promise<'sent' | 'gone'> {
       const address = message.channel.address as { connection?: string; replyTopic?: string; topic?: string }
       const connId = String(address.connection ?? '')
-      const entry = connectionRegistry.current.get(connId)
-      if (!entry) throw new Error('iot: connection not ready: ' + connId)
-      const body: Record<string, unknown> = { via: entry.via, text: message.text }
-      if (message.ticketId) body.ticketId = message.ticketId
-      const rawReply = String(address.replyTopic ?? '')
-      const replyTopic = address.topic ? rawReply.split('{topic}').join(String(address.topic)) : rawReply
-      await entry.client.publishCommand(replyTopic, JSON.stringify(body))
-      return 'sent'
+      const channelKey = connId + '|' + String(address.replyTopic ?? '')
+      try {
+        const entry = connectionRegistry.current.get(connId)
+        if (!entry) throw new Error('iot: connection not ready: ' + connId)
+        const body: Record<string, unknown> = { via: entry.via, text: message.text }
+        if (message.ticketId) body.ticketId = message.ticketId
+        const rawReply = String(address.replyTopic ?? '')
+        const replyTopic = address.topic ? replyTopicFor(rawReply, String(address.topic)) : rawReply
+        await entry.client.publishCommand(replyTopic, JSON.stringify(body))
+        flowStats.out += 1
+        return 'sent'
+      } catch (error) {
+        // 发布失败落 JSONL（无凭据：连接标识+主题，不含密码/密钥），随后照常抛出交引擎退避。
+        flowStats.fail += 1
+        flowStats.lastFailAt = new Date().toISOString()
+        flowStats.lastFail = String(error).slice(0, 200)
+        await logSendFailure({ channelKey, kind: message.kind, error: String(error) })
+        throw error
+      }
     },
     link(address: Record<string, string>) {
       return emptyLink({ zh: '物联网 ' + String(address.connection ?? ''), en: 'IoT ' + String(address.connection ?? '') })

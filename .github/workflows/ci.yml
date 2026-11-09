@@ -1,0 +1,46 @@
+# CI 闸门：typecheck + build（pnpm check）→ node:test 单测（零网络零 broker）→ 发布完整性校验。
+# pnpm 版本沿用源插件家族约定（qq/wechat release.yml 同为 11.23.0；本仓尚无 release.yml）。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: check + test + verify-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.23.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check (typecheck + build)
+        run: pnpm check
+
+      - name: Test
+        run: pnpm test
+
+      - name: Verify package
+        run: node scripts/verify-package.mjs

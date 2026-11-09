@@ -30,3 +30,8 @@ export function apply(ctx: Context): void {
   })
 }
 export { iotKind, IotConfigSchema } from './iot-kind.ts'
+export { aliyunMqttAuth, TENCENT_SDK_APPID, tencentMqttAuth } from './auth.ts'
+export { replyTopicFor, viaMarker } from './mqtt.ts'
+export { compare, dotPath, hash8, matchTopicFilter, randomHex } from './util.ts'
+export { alertCooldownOpen, Deduper, digestDue, isSelfOrRetained, matchAlertRule, RateWindow, withFlowDetail } from './watch.ts'
+export { FAILURE_ERROR_MAX, FAILURE_LOG_LIMIT, logSendFailure, sendFailuresFile } from './failure-log.ts'
