@@ -1,0 +1,58 @@
+{
+  "name": "dsh-superagent-iot",
+  "description": "IoT Source for dsh-superagent: one MQTT client per configured connection (plain password auth, Aliyun/Tencent signed triples); telemetry upgrades to tickets via every/digest modes and threshold alerts with cooldown; replies publish back to command topics with a loop-guard via marker.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "author": "Shuai-S",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "icon": "icon.svg",
+  "files": [
+    "lib",
+    "locale",
+    "docs",
+    "icon.svg",
+    "cordis.patch.yml"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm typecheck && pnpm build",
+    "smoke": "tsx scripts/smoke.ts",
+    "prepare": "pnpm build"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "manifestVersion": 1
+  },
+  "dependencies": {
+    "mqtt": "^5.10.0",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.4",
+    "@types/node": "^22.20.0",
+    "aedes": "^0.51.0",
+    "tsdown": "^0.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

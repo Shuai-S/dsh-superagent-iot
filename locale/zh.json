@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "物联网 Source",
+    "description": "MQTT 物联网消息源：本地 EMQX/Mosquitto/Home Assistant 与阿里云、腾讯云（三元组签名鉴权）broker 的遥测经 every/digest 模式与阈值告警升格为工单；回复经命令主题下发并带 via 回环标记。QoS1 重复与 retained 消息自动过滤，健康面板报告连接数与消息速率。",
+    "detail": "docs/DETAIL.zh.md"
+  }
+}

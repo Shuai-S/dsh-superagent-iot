@@ -1,0 +1,4 @@
+# Mount the iot Source plugin into the superagent profile.
+- insert:
+    - id: dsh-superagent-iot
+      name: 'dsh-superagent-iot'
